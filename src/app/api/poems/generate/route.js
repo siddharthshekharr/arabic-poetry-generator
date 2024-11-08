@@ -1,109 +1,90 @@
-import OpenAI from 'openai';
+import { generatePoemWithWatson } from '@/lib/watson';
 import { NextResponse } from 'next/server';
 import { logger } from '@/lib/logger';
 
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY
-});
-
 export async function POST(req) {
+    const startTime = Date.now();
+
     try {
-        const { topic, style, verses, customPrompt, imageUrl } = await req.json();
+        const requestData = await req.json();
+        const { topic, style, verses, customPrompt } = requestData;
 
-        logger.info('Starting poem generation', { topic, style, verses, hasImage: !!imageUrl });
+        logger.info('Received poem generation request', {
+            requestData,
+            endpoint: '/api/poems/generate',
+            userAgent: req.headers.get('user-agent'),
+            contentType: req.headers.get('content-type')
+        });
 
-        let systemPrompt = `أنت شاعر عربي محترف. قم بإنشاء قصيدة عربية تتبع قواعد البحور الشعرية العربية والقافية.`;
-        let userPrompt = '';
-
-        if (imageUrl) {
-            logger.info('Generating poem from image');
-            try {
-                const response = await openai.chat.completions.create({
-                    model: "gpt-4-vision-preview-1106",
-                    messages: [
-                        {
-                            role: "system",
-                            content: systemPrompt
-                        },
-                        {
-                            role: "user",
-                            content: [
-                                {
-                                    type: "text",
-                                    text: `اكتب قصيدة عربية فصحى تصف هذه الصورة. عدد الأبيات: ${verses}. البحر: ${style}.${customPrompt ? ` ${customPrompt}` : ''}`
-                                },
-                                {
-                                    type: "image_url",
-                                    image_url: {
-                                        url: imageUrl,
-                                        detail: "auto"
-                                    }
-                                }
-                            ]
-                        }
-                    ],
-                    max_tokens: 500,
-                    temperature: 0.7
-                });
-
-                logger.info('Successfully generated poem from image');
-                return NextResponse.json({
-                    poem: response.choices[0].message.content
-                });
-
-            } catch (imageError) {
-                logger.error('Failed to generate poem from image', imageError);
-
-                // Fallback to text-based generation if vision API fails
-                logger.info('Falling back to text-based generation');
-                userPrompt = `اكتب قصيدة عربية فصحى. عدد الأبيات: ${verses}. البحر: ${style}.`;
-                if (customPrompt) userPrompt += ` ${customPrompt}`;
-
-                const fallbackResponse = await openai.chat.completions.create({
-                    model: "gpt-3.5-turbo",
-                    messages: [
-                        { role: "system", content: systemPrompt },
-                        { role: "user", content: userPrompt }
-                    ],
-                    temperature: 0.7,
-                    max_tokens: 500,
-                });
-
-                logger.info('Successfully generated fallback poem');
-                return NextResponse.json({
-                    poem: fallbackResponse.choices[0].message.content,
-                    fallback: true
-                });
-            }
-        } else {
-            logger.info('Generating poem from topic');
-            userPrompt = `اكتب قصيدة عربية فصحى عن ${topic}. عدد الأبيات: ${verses}. البحر: ${style}.`;
-
-            if (customPrompt) {
-                userPrompt += ` ${customPrompt}`;
-            }
-
-            const response = await openai.chat.completions.create({
-                model: "gpt-3.5-turbo",
-                messages: [
-                    { role: "system", content: systemPrompt },
-                    { role: "user", content: userPrompt }
-                ],
-                temperature: 0.7,
-                max_tokens: 500,
-            });
-
-            logger.info('Successfully generated poem from topic');
-            return NextResponse.json({
-                poem: response.choices[0].message.content
-            });
+        // Input validation
+        if (!style) {
+            logger.error('Missing required field: style', { requestData });
+            return NextResponse.json(
+                { error: 'البحر مطلوب' },
+                { status: 400 }
+            );
         }
+
+        if (!verses || isNaN(verses)) {
+            logger.error('Invalid verses value', { verses, requestData });
+            return NextResponse.json(
+                { error: 'عدد الأبيات غير صالح' },
+                { status: 400 }
+            );
+        }
+
+        logger.debug('Validated input, calling Watson API', { topic, style, verses });
+
+        const { poem } = await generatePoemWithWatson({
+            topic,
+            style,
+            verses: parseInt(verses),
+            customPrompt
+        });
+
+        const responseTime = Date.now() - startTime;
+
+        logger.info('Successfully generated poem', {
+            responseTime,
+            poemLength: poem?.length || 0,
+            topic,
+            style,
+            verses
+        });
+
+        if (!poem) {
+            logger.error('Empty poem received from Watson', { requestData });
+            return NextResponse.json(
+                { error: 'فشل في إنشاء القصيدة' },
+                { status: 500 }
+            );
+        }
+
+        return NextResponse.json({
+            poem,
+            metadata: {
+                generationTime: responseTime,
+                timestamp: new Date().toISOString(),
+                topic,
+                style,
+                verses
+            }
+        });
+
     } catch (error) {
-        logger.error('Error in poem generation', error);
+        const responseTime = Date.now() - startTime;
+
+        logger.error('Error in poem generation endpoint', error, {
+            responseTime,
+            endpoint: '/api/poems/generate',
+            errorCode: error.code,
+            errorStatus: error.status
+        });
+
         return NextResponse.json(
             {
-                error: 'Failed to generate poem',
-                details: error.message
+                error: 'فشل في إنشاء القصيدة',
+                details: process.env.NODE_ENV === 'development' ? error.message : undefined
             },
             { status: error.status || 500 }
         );

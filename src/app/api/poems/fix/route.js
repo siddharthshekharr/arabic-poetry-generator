@@ -1,52 +1,85 @@
-import OpenAI from 'openai';
+import { fixPoemWithWatson } from '@/lib/watson';
 import { NextResponse } from 'next/server';
 import { logger } from '@/lib/logger';
 
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY
-});
-
 export async function POST(req) {
-    try {
-        const { poem } = await req.json();
+    const startTime = Date.now();
 
+    try {
+        const requestData = await req.json();
+        const { poem } = requestData;
+
+        logger.info('Received poem fix request', {
+            poemLength: poem?.length || 0,
+            endpoint: '/api/poems/fix',
+            userAgent: req.headers.get('user-agent'),
+            contentType: req.headers.get('content-type')
+        });
+
+        // Input validation
         if (!poem?.trim()) {
-            logger.error('Empty poem received');
+            logger.error('Empty poem received', { requestData });
             return NextResponse.json(
-                { error: 'Poem text is required' },
+                { error: 'النص مطلوب' },
                 { status: 400 }
             );
         }
 
-        logger.info('Starting poem correction', { poemLength: poem.length });
+        if (poem.length > 5000) {
+            logger.error('Poem too long', { poemLength: poem.length });
+            return NextResponse.json(
+                { error: 'النص طويل جداً' },
+                { status: 400 }
+            );
+        }
 
-        const response = await openai.chat.completions.create({
-            model: "gpt-3.5-turbo",
-            messages: [
-                {
-                    role: "system",
-                    content: `أنت خبير في تصحيح وتحسين الشعر العربي. قم بتصحيح الأخطاء العروضية واللغوية وتحسين الصياغة.
-                            اشرح التصحيحات التي قمت بها في نهاية النص.`
-                },
-                {
-                    role: "user",
-                    content: `قم بتصحيح وتحسين هذه القصيدة:\n${poem}`
-                }
-            ],
-            temperature: 0.7,
-            max_tokens: 1000,
+        logger.debug('Validated input, calling Watson API', {
+            poemLength: poem.length,
+            firstLine: poem.split('\n')[0]
         });
 
-        logger.info('Successfully fixed poem');
+        const { fixedPoem } = await fixPoemWithWatson(poem);
+
+        const responseTime = Date.now() - startTime;
+
+        logger.info('Successfully fixed poem', {
+            responseTime,
+            originalLength: poem.length,
+            fixedLength: fixedPoem?.length || 0
+        });
+
+        if (!fixedPoem) {
+            logger.error('Empty response received from Watson', { requestData });
+            return NextResponse.json(
+                { error: 'فشل في تصحيح القصيدة' },
+                { status: 500 }
+            );
+        }
+
         return NextResponse.json({
-            fixedPoem: response.choices[0].message.content
+            fixedPoem,
+            metadata: {
+                processingTime: responseTime,
+                timestamp: new Date().toISOString(),
+                originalLength: poem.length,
+                fixedLength: fixedPoem.length
+            }
         });
+
     } catch (error) {
-        logger.error('Error in poem correction', error);
+        const responseTime = Date.now() - startTime;
+
+        logger.error('Error in poem fix endpoint', error, {
+            responseTime,
+            endpoint: '/api/poems/fix',
+            errorCode: error.code,
+            errorStatus: error.status
+        });
+
         return NextResponse.json(
             {
-                error: 'Failed to fix poem',
-                details: error.message
+                error: 'فشل في تصحيح القصيدة',
+                details: process.env.NODE_ENV === 'development' ? error.message : undefined
             },
             { status: error.status || 500 }
         );
