@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { ChevronRight, ChevronLeft, Camera, Book, X, ArrowLeft, Pen, Wrench } from 'lucide-react';
+import { generatePoem, fixPoem } from '@/lib/api';
+import { toast } from "sonner";
 
 const topics = ['حب', 'حكمة', 'شجاعة', 'طبيعة', 'وطن', 'غربة'];
 
@@ -15,6 +17,8 @@ const PoetryGenerationInterface = () => {
     const [generatedPoem, setGeneratedPoem] = useState('');
     const [originalPoem, setOriginalPoem] = useState('');
     const [fixedPoem, setFixedPoem] = useState('');
+    const [customPrompt, setCustomPrompt] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
 
     const handleTaskSelection = (task) => {
         setSelectedTask(task);
@@ -22,10 +26,29 @@ const PoetryGenerationInterface = () => {
         setShowTopics(false);
     };
 
-    const handleImageUpload = (event) => {
+    const handleImageUpload = async (event) => {
         if (!selectedTopic && event.target.files[0]) {
-            setUploadedImage(URL.createObjectURL(event.target.files[0]));
-            setShowTopics(false);
+            const file = event.target.files[0];
+
+            if (file.size > 5 * 1024 * 1024) {
+                toast.error('حجم الصورة يجب أن يكون أقل من 5 ميغابايت');
+                return;
+            }
+
+            try {
+                // Convert to base64
+                const base64 = await new Promise((resolve) => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => resolve(reader.result);
+                    reader.readAsDataURL(file);
+                });
+
+                setUploadedImage(base64);
+                setShowTopics(false);
+            } catch (error) {
+                toast.error('حدث خطأ أثناء تحميل الصورة');
+                console.error('Error uploading image:', error);
+            }
         }
     };
 
@@ -39,6 +62,72 @@ const PoetryGenerationInterface = () => {
     const handleTopicButtonClick = () => {
         if (!uploadedImage) {
             setShowTopics(!showTopics);
+        }
+    };
+
+    const handleGeneratePoem = async () => {
+        try {
+            setIsLoading(true);
+
+            let imageBase64;
+            if (uploadedImage) {
+                const response = await fetch(uploadedImage);
+                const blob = await response.blob();
+                imageBase64 = await new Promise((resolve) => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => resolve(reader.result);
+                    reader.readAsDataURL(blob);
+                });
+            }
+
+            const { poem } = await generatePoem({
+                topic: selectedTopic,
+                style,
+                verses,
+                customPrompt,
+                imageUrl: imageBase64
+            });
+
+            setGeneratedPoem(poem);
+            setCurrentStep(3);
+            toast.success('تم إنشاء القصيدة بنجاح');
+        } catch (error) {
+            toast.error('حدث خطأ أثناء إنشاء القصيدة. يرجى المحاولة مرة أخرى.');
+            console.error('Error generating poem:', error);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleFixPoem = async () => {
+        try {
+            if (!originalPoem.trim()) {
+                toast.error('يرجى إدخال نص القصيدة أولاً');
+                return;
+            }
+
+            setIsLoading(true);
+            const { fixedPoem: newFixedPoem } = await fixPoem(originalPoem);
+            setFixedPoem(newFixedPoem);
+            toast.success('تم تصحيح القصيدة بنجاح');
+        } catch (error) {
+            toast.error('حدث خطأ أثناء تصحيح القصيدة. يرجى المحاولة مرة أخرى.');
+            console.error('Error fixing poem:', error);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleCopyPoem = async () => {
+        const textToCopy = generatedPoem || fixedPoem;
+        if (!textToCopy) return;
+
+        try {
+            await navigator.clipboard.writeText(textToCopy);
+            toast.success('تم نسخ القصيدة بنجاح');
+        } catch (error) {
+            toast.error('فشل نسخ النص. يرجى المحاولة مرة أخرى.');
+            console.error('Error copying text:', error);
         }
     };
 
@@ -70,6 +159,7 @@ const PoetryGenerationInterface = () => {
         setGeneratedPoem('');
         setOriginalPoem('');
         setFixedPoem('');
+        setCustomPrompt('');
     };
 
     const renderTaskSelection = () => (
@@ -95,9 +185,23 @@ const PoetryGenerationInterface = () => {
         <div className="w-full mx-auto grid grid-cols-2 gap-8">
             <div className="bg-white/10 backdrop-blur-sm rounded-lg p-6">
                 <h2 className="text-white text-right mb-4 text-lg">التعديل</h2>
-                <div className="w-full min-h-[300px] text-white text-right">
-                    {fixedPoem || 'سيظهر الشعر المعدل هنا...'}
+                <div className="w-full min-h-[300px] text-white text-right relative">
+                    {isLoading ? (
+                        <div className="absolute inset-0 flex items-center justify-center">
+                            <div className="animate-spin rounded-full h-8 w-8 border-2 border-white border-t-transparent"></div>
+                        </div>
+                    ) : (
+                        fixedPoem || 'سيظهر الشعر المعدل هنا...'
+                    )}
                 </div>
+                {fixedPoem && (
+                    <button
+                        onClick={handleCopyPoem}
+                        className="mt-4 px-4 py-2 bg-purple-500/50 hover:bg-purple-500/70 rounded-lg text-white transition-colors"
+                    >
+                        نسخ
+                    </button>
+                )}
             </div>
 
             <div className="bg-white/10 backdrop-blur-sm rounded-lg p-6 relative">
@@ -105,17 +209,19 @@ const PoetryGenerationInterface = () => {
                 <textarea
                     value={originalPoem}
                     onChange={(e) => setOriginalPoem(e.target.value)}
-                    className="w-full h-[calc(100%-100px)] bg-transparent text-white text-right 
-                        resize-none focus:outline-none placeholder-white/50"
+                    className="w-full h-[calc(100%-100px)] bg-transparent text-white text-right resize-none focus:outline-none placeholder-white/50"
                     placeholder="ضع قصيدتك هنا..."
                     dir="rtl"
+                    disabled={isLoading}
                 />
                 <button
-                    onClick={() => {/* Add your fix poem logic here */ }}
-                    className="absolute bottom-6 left-6 px-6 py-2 rounded-lg 
-                        bg-purple-500/50 hover:bg-purple-500/70 text-white transition-colors"
+                    onClick={handleFixPoem}
+                    disabled={isLoading || !originalPoem.trim()}
+                    className={`absolute bottom-6 left-6 px-6 py-2 rounded-lg 
+                        ${isLoading || !originalPoem.trim() ? 'bg-purple-500/30 cursor-not-allowed' : 'bg-purple-500/50 hover:bg-purple-500/70'} 
+                        text-white transition-colors`}
                 >
-                    إنشاء
+                    {isLoading ? 'جاري المعالجة...' : 'إنشاء'}
                 </button>
             </div>
         </div>
@@ -171,10 +277,9 @@ const PoetryGenerationInterface = () => {
                                         <button
                                             key={topic}
                                             onClick={() => handleTopicSelect(topic)}
-                                            className="absolute h-14 w-14 rounded-full bg-purple-900 
-                                                hover:bg-purple-800 flex items-center justify-center
-                                                text-white text-sm transition-colors duration-200
-                                                shadow-lg backdrop-blur-sm"
+                                            className="absolute h-14 w-14 rounded-full bg-purple-900 hover:bg-purple-800 
+                                                flex items-center justify-center text-white text-sm transition-colors 
+                                                duration-200 shadow-lg backdrop-blur-sm"
                                             style={{
                                                 left: `${150 + x}px`,
                                                 top: `${y}px`,
@@ -244,6 +349,8 @@ const PoetryGenerationInterface = () => {
                 <label className="block text-white text-right">خصص</label>
                 <input
                     type="text"
+                    value={customPrompt}
+                    onChange={(e) => setCustomPrompt(e.target.value)}
                     className="w-full p-3 rounded-lg bg-white/10 text-white border border-white/20"
                     placeholder="اكتب شيء معين مثلاً...."
                     dir="rtl"
@@ -269,14 +376,21 @@ const PoetryGenerationInterface = () => {
 
     const renderGeneratedPoem = () => (
         <div className="space-y-6 w-full max-w-2xl mx-auto">
-            <div className="bg-white/10 rounded-lg p-6 min-h-[300px] text-white text-right">
-                {generatedPoem || 'القصيدة ستظهر هنا...'}
+            <div className="bg-white/10 rounded-lg p-6 min-h-[300px] text-white text-right relative">
+                {isLoading ? (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                        <div className="animate-spin rounded-full h-8 w-8 border-2 border-white border-t-transparent"></div>
+                    </div>
+                ) : (
+                    generatedPoem || 'القصيدة ستظهر هنا...'
+                )}
             </div>
             <div className="flex justify-center gap-4">
-                <button className="px-6 py-2 rounded-lg bg-white/20 text-white hover:bg-white/30 transition-colors">
-                    تعديل
-                </button>
-                <button className="px-6 py-2 rounded-lg bg-white/20 text-white hover:bg-white/30 transition-colors">
+                <button
+                    onClick={handleCopyPoem}
+                    disabled={!generatedPoem || isLoading}
+                    className="px-6 py-2 rounded-lg bg-white/20 text-white hover:bg-white/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
                     نسخ
                 </button>
             </div>
@@ -310,7 +424,8 @@ const PoetryGenerationInterface = () => {
                         {currentStep > 0 && (
                             <button
                                 onClick={handleBack}
-                                className="flex items-center gap-2 text-white hover:text-purple-300"
+                                disabled={isLoading}
+                                className="flex items-center gap-2 text-white hover:text-purple-300 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 <ChevronRight className="w-5 h-5" />
                                 السابق
@@ -319,14 +434,17 @@ const PoetryGenerationInterface = () => {
 
                         {currentStep < 3 && (
                             <button
-                                onClick={handleNext}
-                                disabled={currentStep === 1 && !selectedTopic && !uploadedImage}
-                                className={`flex items-center gap-2 ${currentStep === 1 && !selectedTopic && !uploadedImage
-                                        ? 'text-gray-500 cursor-not-allowed'
-                                        : 'text-white hover:text-purple-300'
+                                onClick={currentStep === 2 ? handleGeneratePoem : handleNext}
+                                disabled={
+                                    isLoading ||
+                                    (currentStep === 1 && !selectedTopic && !uploadedImage)
+                                }
+                                className={`flex items-center gap-2 ${isLoading || (currentStep === 1 && !selectedTopic && !uploadedImage)
+                                    ? 'text-gray-500 cursor-not-allowed'
+                                    : 'text-white hover:text-purple-300'
                                     } mr-auto`}
                             >
-                                التالي
+                                {currentStep === 2 && isLoading ? 'جاري المعالجة...' : 'التالي'}
                                 <ChevronLeft className="w-5 h-5" />
                             </button>
                         )}
@@ -336,7 +454,8 @@ const PoetryGenerationInterface = () => {
                 {currentStep > 0 && (
                     <button
                         onClick={handleReset}
-                        className="absolute top-4 left-4 text-white hover:text-purple-300 flex items-center gap-2"
+                        disabled={isLoading}
+                        className="absolute top-4 left-4 text-white hover:text-purple-300 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         <ArrowLeft className="w-5 h-5" />
                         العودة للرئيسية
