@@ -13,6 +13,8 @@ const PoetryGenerationInterface = () => {
     const [verses, setVerses] = useState(5);
     const [style, setStyle] = useState('طويل');
     const [generatedPoem, setGeneratedPoem] = useState('');
+    const [originalPoem, setOriginalPoem] = useState('');
+    const [fixedPoem, setFixedPoem] = useState('');
 
     const handleTaskSelection = (task) => {
         setSelectedTask(task);
@@ -41,6 +43,10 @@ const PoetryGenerationInterface = () => {
     };
 
     const handleNext = () => {
+        if (selectedTask === 'fix') {
+            return;
+        }
+
         if ((selectedTopic || uploadedImage) && currentStep === 1) {
             setCurrentStep(2);
         } else if (currentStep < 3) {
@@ -62,6 +68,8 @@ const PoetryGenerationInterface = () => {
         setSelectedTopic(null);
         setShowTopics(false);
         setGeneratedPoem('');
+        setOriginalPoem('');
+        setFixedPoem('');
     };
 
     const renderTaskSelection = () => (
@@ -80,6 +88,36 @@ const PoetryGenerationInterface = () => {
                 <Wrench className="w-12 h-12 text-white opacity-80" />
                 <span className="text-white text-lg">اصلح الشعر</span>
             </button>
+        </div>
+    );
+
+    const renderFixPoem = () => (
+        <div className="w-full mx-auto grid grid-cols-2 gap-8">
+            <div className="bg-white/10 backdrop-blur-sm rounded-lg p-6">
+                <h2 className="text-white text-right mb-4 text-lg">التعديل</h2>
+                <div className="w-full min-h-[300px] text-white text-right">
+                    {fixedPoem || 'سيظهر الشعر المعدل هنا...'}
+                </div>
+            </div>
+
+            <div className="bg-white/10 backdrop-blur-sm rounded-lg p-6 relative">
+                <h2 className="text-white text-right mb-4 text-lg">اكتب / الصق الشعر هنا</h2>
+                <textarea
+                    value={originalPoem}
+                    onChange={(e) => setOriginalPoem(e.target.value)}
+                    className="w-full h-[calc(100%-100px)] bg-transparent text-white text-right 
+                        resize-none focus:outline-none placeholder-white/50"
+                    placeholder="ضع قصيدتك هنا..."
+                    dir="rtl"
+                />
+                <button
+                    onClick={() => {/* Add your fix poem logic here */ }}
+                    className="absolute bottom-6 left-6 px-6 py-2 rounded-lg 
+                        bg-purple-500/50 hover:bg-purple-500/70 text-white transition-colors"
+                >
+                    إنشاء
+                </button>
+            </div>
         </div>
     );
 
@@ -124,7 +162,6 @@ const PoetryGenerationInterface = () => {
                         <div className="absolute left-1/2 -translate-x-1/2">
                             <div className="relative w-[300px] h-[150px]">
                                 {topics.map((topic, index) => {
-                                    // Modified angle calculation to rotate by 180 degrees (adding Math.PI)
                                     const angle = Math.PI + Math.PI * (index / (topics.length - 1));
                                     const radius = 130;
                                     const x = radius * Math.cos(angle);
@@ -135,9 +172,9 @@ const PoetryGenerationInterface = () => {
                                             key={topic}
                                             onClick={() => handleTopicSelect(topic)}
                                             className="absolute h-14 w-14 rounded-full bg-purple-900 
-                            hover:bg-purple-800 flex items-center justify-center
-                            text-white text-sm transition-colors duration-200
-                            shadow-lg backdrop-blur-sm"
+                                                hover:bg-purple-800 flex items-center justify-center
+                                                text-white text-sm transition-colors duration-200
+                                                shadow-lg backdrop-blur-sm"
                                             style={{
                                                 left: `${150 + x}px`,
                                                 top: `${y}px`,
@@ -251,7 +288,7 @@ const PoetryGenerationInterface = () => {
             case 0:
                 return renderTaskSelection();
             case 1:
-                return renderInputSelection();
+                return selectedTask === 'fix' ? renderFixPoem() : renderInputSelection();
             case 2:
                 return renderPoemSettings();
             case 3:
@@ -268,31 +305,33 @@ const PoetryGenerationInterface = () => {
 
                 {renderCurrentStep()}
 
-                <div className="flex justify-between mt-8">
-                    {currentStep > 0 && (
-                        <button
-                            onClick={handleBack}
-                            className="flex items-center gap-2 text-white hover:text-purple-300"
-                        >
-                            <ChevronRight className="w-5 h-5" />
-                            السابق
-                        </button>
-                    )}
+                {selectedTask !== 'fix' && (
+                    <div className="flex justify-between mt-8">
+                        {currentStep > 0 && (
+                            <button
+                                onClick={handleBack}
+                                className="flex items-center gap-2 text-white hover:text-purple-300"
+                            >
+                                <ChevronRight className="w-5 h-5" />
+                                السابق
+                            </button>
+                        )}
 
-                    {currentStep < 3 && (
-                        <button
-                            onClick={handleNext}
-                            disabled={currentStep === 1 && !selectedTopic && !uploadedImage}
-                            className={`flex items-center gap-2 ${currentStep === 1 && !selectedTopic && !uploadedImage
-                                ? 'text-gray-500 cursor-not-allowed'
-                                : 'text-white hover:text-purple-300'
-                                } mr-auto`}
-                        >
-                            التالي
-                            <ChevronLeft className="w-5 h-5" />
-                        </button>
-                    )}
-                </div>
+                        {currentStep < 3 && (
+                            <button
+                                onClick={handleNext}
+                                disabled={currentStep === 1 && !selectedTopic && !uploadedImage}
+                                className={`flex items-center gap-2 ${currentStep === 1 && !selectedTopic && !uploadedImage
+                                        ? 'text-gray-500 cursor-not-allowed'
+                                        : 'text-white hover:text-purple-300'
+                                    } mr-auto`}
+                            >
+                                التالي
+                                <ChevronLeft className="w-5 h-5" />
+                            </button>
+                        )}
+                    </div>
+                )}
 
                 {currentStep > 0 && (
                     <button
